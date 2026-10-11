@@ -5,3 +5,5 @@ venv/
 reports/
 .env
 .pytest_cache/
+
+sentinelx.db

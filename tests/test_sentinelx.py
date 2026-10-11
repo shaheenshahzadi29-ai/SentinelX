@@ -1,6 +1,8 @@
 
 import hashlib
 import json
+import os
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -57,6 +59,50 @@ class SentinelXTests(unittest.TestCase):
 
             self.assertGreaterEqual(
                 report["analysis"]["indicator_count"], 1
+            )
+
+
+    def test_database_saves_detailed_findings(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            sample = temp / "sample.txt"
+            database = temp / "sentinelx.db"
+            sample.write_bytes(b"Example contains VirtualAlloc")
+
+            env = os.environ.copy()
+            env["SENTINELX_DB_PATH"] = str(database)
+
+            subprocess.run(
+                [sys.executable, str(SCRIPT), str(sample)],
+                cwd=temp,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+
+            self.assertTrue(database.exists())
+
+            with sqlite3.connect(database) as connection:
+                row = connection.execute("""
+                    SELECT file_name, sha256, findings_count, findings_json
+                    FROM scan_history
+                    ORDER BY id DESC
+                    LIMIT 1
+                """).fetchone()
+
+            self.assertIsNotNone(row)
+            self.assertEqual(row[0], "sample.txt")
+            self.assertEqual(
+                row[1],
+                hashlib.sha256(b"Example contains VirtualAlloc").hexdigest()
+            )
+            self.assertGreaterEqual(row[2], 1)
+
+            findings = json.loads(row[3])
+            self.assertTrue(
+                any("virtualalloc" in item["matched_pattern"].lower()
+                    for item in findings)
             )
 
 
