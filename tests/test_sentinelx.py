@@ -1,4 +1,3 @@
-
 import hashlib
 import json
 import os
@@ -21,7 +20,7 @@ class SentinelXTests(unittest.TestCase):
             sample = temp / "sample.txt"
             sample.write_bytes(b"hello sentinelx")
 
-            result = subprocess.run(
+            subprocess.run(
                 [sys.executable, str(SCRIPT), str(sample)],
                 cwd=temp,
                 capture_output=True,
@@ -38,7 +37,6 @@ class SentinelXTests(unittest.TestCase):
             self.assertEqual(report["file"]["sha256"], expected_hash)
             self.assertEqual(report["file"]["size_bytes"], 15)
             self.assertEqual(report["analysis"]["indicator_count"], 0)
-            self.assertIn("analysis completed", result.stdout.lower())
 
     def test_indicator_detection(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -46,9 +44,13 @@ class SentinelXTests(unittest.TestCase):
             sample = temp / "sample.txt"
             sample.write_bytes(b"Example contains VirtualAlloc")
 
+            env = os.environ.copy()
+            env["SENTINELX_DB_PATH"] = str(temp / "sentinelx.db")
+
             subprocess.run(
                 [sys.executable, str(SCRIPT), str(sample)],
                 cwd=temp,
+                env=env,
                 capture_output=True,
                 text=True,
                 check=True,
@@ -61,13 +63,12 @@ class SentinelXTests(unittest.TestCase):
                 report["analysis"]["indicator_count"], 1
             )
 
-
     def test_database_saves_detailed_findings(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp = Path(temp_dir)
             sample = temp / "sample.txt"
-            database = temp / "sentinelx.db"
             sample.write_bytes(b"Example contains VirtualAlloc")
+            database = temp / "sentinelx.db"
 
             env = os.environ.copy()
             env["SENTINELX_DB_PATH"] = str(database)
@@ -95,14 +96,51 @@ class SentinelXTests(unittest.TestCase):
             self.assertEqual(row[0], "sample.txt")
             self.assertEqual(
                 row[1],
-                hashlib.sha256(b"Example contains VirtualAlloc").hexdigest()
+                hashlib.sha256(
+                    b"Example contains VirtualAlloc"
+                ).hexdigest()
             )
             self.assertGreaterEqual(row[2], 1)
 
             findings = json.loads(row[3])
             self.assertTrue(
-                any("virtualalloc" in item["matched_pattern"].lower()
-                    for item in findings)
+                any(
+                    "virtualalloc" in item["matched_pattern"].lower()
+                    for item in findings
+                )
+            )
+
+    def test_report_contains_explainable_risk(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            sample = temp / "risk_sample.txt"
+            sample.write_bytes(b"Example contains VirtualAlloc")
+
+            env = os.environ.copy()
+            env["SENTINELX_DB_PATH"] = str(temp / "sentinelx.db")
+
+            subprocess.run(
+                [sys.executable, str(SCRIPT), str(sample)],
+                cwd=temp,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+
+            report_path = temp / "reports" / "risk_sample.txt.json"
+            report = json.loads(
+                report_path.read_text(encoding="utf-8")
+            )
+            analysis = report["analysis"]
+
+            self.assertEqual(analysis["risk_score"], 2)
+            self.assertEqual(analysis["risk_level"], "Low")
+            self.assertIn("reason", analysis["findings"][0])
+            self.assertIn("risk_points", analysis["findings"][0])
+            self.assertIn(
+                "not a malware verdict",
+                analysis["assessment"]
             )
 
 

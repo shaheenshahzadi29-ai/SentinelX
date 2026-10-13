@@ -70,6 +70,34 @@ def analyze_file(filename):
                 "matched_pattern": pattern.decode("ascii")
             })
 
+    # Explainable, rule-based triage. This is not a malware verdict.
+    risk_points = {
+        "Encoded PowerShell command": 2,
+        "Windows command interpreter usage": 1,
+        "Possible process injection API": 3,
+        "Memory allocation API often examined in malware": 2,
+        "Possible network communication code": 1,
+    }
+
+    for finding in findings:
+        finding["risk_points"] = risk_points.get(finding["indicator"], 1)
+        finding["reason"] = (
+            finding["indicator"]
+            + ". This pattern can appear in legitimate software too, "
+              "so it requires context and further investigation."
+        )
+
+    score = min(10, sum(item["risk_points"] for item in findings))
+
+    if score >= 6:
+        risk_level = "High"
+    elif score >= 3:
+        risk_level = "Medium"
+    elif score >= 1:
+        risk_level = "Low"
+    else:
+        risk_level = "Informational"
+
     report = {
         "tool": "SentinelX",
         "report_version": "1.0",
@@ -83,10 +111,12 @@ def analyze_file(filename):
             "type": "basic_static_indicator_scan",
             "indicator_count": len(findings),
             "findings": findings,
+            "risk_score": score,
+            "risk_level": risk_level,
             "assessment": (
-                "Indicators found; further investigation recommended"
+                "Suspicious indicators require investigation; this is not a malware verdict."
                 if findings
-                else "No configured indicators found"
+                else "No configured indicators found; this does not prove the file is safe."
             ),
             "limitations": (
                 "String matches alone do not establish that a file is malicious."
